@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.5; color: #1a1a1a; }
+  h1 { font-size: 16pt; margin: 0 0 2px; }
+  .sub { color: #666; font-size: 9.5pt; margin-bottom: 16px; }
+  h2 { font-size: 12pt; margin: 20px 0 6px; padding-bottom: 4px; border-bottom: 2px solid #1f3864; color: #1f3864; }
+  h3 { font-size: 10.5pt; margin: 12px 0 4px; }
+  p { margin: 6px 0; }
+  code { font-family: "SF Mono", Consolas, monospace; font-size: 9pt; background: #f1f3f5; padding: 1px 4px; border-radius: 3px; }
+  pre { font-family: "SF Mono", Consolas, monospace; font-size: 8.5pt; background: #f1f3f5; padding: 8px 10px; border-left: 3px solid #1f3864; margin: 6px 0; white-space: pre-wrap; }
+  ul, ol { margin: 6px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 9.5pt; }
+  th, td { border: 1px solid #ccc; padding: 5px 7px; text-align: left; vertical-align: top; }
+  th { background: #eef1f6; }
+  .box { background: #fff8e1; border-left: 3px solid #e8a000; padding: 8px 10px; margin: 8px 0; }
+  .foot { margin-top: 22px; padding-top: 8px; border-top: 1px solid #ccc; color: #666; font-size: 9pt; }
+</style></head><body>
+
+<h1>Informe técnico — Formulario de reservas</h1>
+<div class="sub">taxisanfernandobahia.com (Transfer Gadir) · 6 de octubre de 2026</div>
+
+<p style="background:#eef1f6;padding:8px 10px;border-radius:4px;margin-bottom:14px"><a href="informe-formulario-taxisanfernandobahia.pdf" style="color:#1f3864;font-weight:600">Descargar este informe en PDF</a></p>
+<p><strong>Para:</strong> el equipo que implementó el formulario de reservas.<br>
+<strong>De:</strong> Anirudha Talmale, encargado de la optimización de velocidad del sitio.</p>
+
+<p>Estoy trabajando en el rendimiento de la web. Durante el análisis he detectado dos cuestiones que afectan a vuestro código, no al mío. No voy a tocar el formulario: el cliente ha decidido que lo gestionéis vosotros y me parece lo correcto. Os paso los detalles para que no tengáis que investigarlo.</p>
+
+<h2>1. El código del formulario está en el tema padre y se borra en cada actualización</h2>
+
+<h3>Situación actual</h3>
+<p>Los archivos del formulario están dentro del tema <code>hello-elementor</code>, que es el tema original de Elementor:</p>
+<pre>wp-content/themes/hello-elementor/js/custom-filter.js
+wp-content/themes/hello-elementor/js/flatpickr.min.js</pre>
+<p>No hay ningún tema hijo instalado. El formulario se inyecta mediante un shortcode y genera <code>&lt;form id="taxonomy-post-filter-form"&gt;</code>, con <code>#dropdown-1</code> cargando 96 destinos con sus atributos <code>data-term-id</code>, <code>data-round-trip-km</code> y <code>data-round-km</code>.</p>
+
+<h3>Consecuencia</h3>
+<p>Al actualizar Hello Elementor, WordPress reemplaza el directorio completo del tema y esos archivos desaparecen. El formulario deja de funcionar y se detienen las reservas.</p>
+
+<div class="box"><strong>Esto ya ocurrió.</strong> El cliente confirma que actualizó el tema, el formulario falló, y lo resolvió restaurando una copia de seguridad anterior. La restauración devolvió el tema antiguo con los archivos dentro, pero no corrigió la causa.</div>
+
+<h3>Estado que dejó esa restauración</h3>
+<table>
+  <tr><th>Componente</th><th>Instalado</th><th>Última versión</th></tr>
+  <tr><td>Hello Elementor (tema)</td><td>2.6.1</td><td>3.5.1</td></tr>
+  <tr><td>Elementor</td><td>4.3.2</td><td>4.3.4</td></tr>
+</table>
+<p>La cabecera de <code>style.css</code> del tema instalado indica <code>Tested up to: 5.9</code>, mientras que el sitio ejecuta WordPress 7.1.2. Es decir, hay un tema de 2022 bajo un constructor de páginas de 2026, y la actualización pendiente sigue esperando en el panel.</p>
+
+<h3>Solución propuesta</h3>
+<ol>
+  <li>Crear un tema hijo de <code>hello-elementor</code> (<code>style.css</code> con <code>Template: hello-elementor</code> y un <code>functions.php</code> que encole el estilo del padre).</li>
+  <li>Mover <code>custom-filter.js</code>, <code>flatpickr.min.js</code> y cualquier modificación hecha en <code>functions.php</code> del padre al tema hijo.</li>
+  <li>Activar el tema hijo y verificar una reserva completa de principio a fin.</li>
+  <li>Solo entonces actualizar el tema padre a 3.5.1.</li>
+</ol>
+
+<h2>2. Los archivos JS del formulario nunca se almacenan en caché</h2>
+
+<h3>Evidencia</h3>
+<p>Ambos archivos se encolan con un número de versión que cambia en cada carga de página. Tres peticiones a la portada separadas por unos segundos devolvieron:</p>
+<pre>custom-filter.js?ver=1791281447
+custom-filter.js?ver=1791281453
+custom-filter.js?ver=1791281459</pre>
+<p>El valor es una marca de tiempo Unix generada en el momento de la carga, muy probablemente <code>time()</code> o <code>filemtime()</code> mal aplicado en la llamada a <code>wp_enqueue_script()</code>.</p>
+
+<h3>Consecuencia</h3>
+<p>El servidor ya envía las cabeceras correctas para estos archivos:</p>
+<pre>cache-control: max-age=31536000
+expires: Wed, 06 Oct 2027 10:11:23 GMT</pre>
+<p>La caché está bien configurada en el servidor, pero queda anulada: al cambiar la cadena de consulta, el navegador interpreta una URL distinta en cada visita y vuelve a descargar los archivos completos.</p>
+
+<table>
+  <tr><th>Archivo</th><th>Tamaño original</th><th>Transferido (brotli)</th></tr>
+  <tr><td>custom-filter.js</td><td>38 KB</td><td>7 KB</td></tr>
+  <tr><td>flatpickr.min.js</td><td>49 KB</td><td>13 KB</td></tr>
+</table>
+
+<p>Son 20 KB que cada visitante descarga en cada página que visita, de forma permanente y sin ningún beneficio. Afecta sobre todo a móvil con conexión lenta, que es el perfil mayoritario de este sitio.</p>
+
+<h3>Solución propuesta</h3>
+<p>Sustituir la marca de tiempo por una versión estática que solo se modifique al cambiar el archivo:</p>
+<pre>// En lugar de:
+wp_enqueue_script( 'custom-filter', $url, array('jquery'), time() );
+
+// Usar una constante que se suba manualmente al editar el archivo:
+wp_enqueue_script( 'custom-filter', $url, array('jquery'), '1.0.3' );
+
+// O bien la fecha real de modificación del archivo:
+wp_enqueue_script( 'custom-filter', $url, array('jquery'),
+    filemtime( get_stylesheet_directory() . '/js/custom-filter.js' ) );</pre>
+<p>La segunda opción es la más cómoda: el número solo cambia cuando el archivo cambia de verdad, de modo que la caché funciona y aun así los usuarios reciben siempre la última versión tras un despliegue.</p>
+
+<h2>3. Delimitación de responsabilidades</h2>
+<p>Para evitar solapamientos durante la optimización de velocidad, por mi parte:</p>
+<ul>
+  <li><strong>No modificaré</strong> <code>custom-filter.js</code> ni <code>flatpickr.min.js</code>, ni la lógica del shortcode del formulario.</li>
+  <li><strong>Excluiré expresamente ambos archivos</strong> de cualquier minificación, combinación o aplazamiento de JavaScript, que es la causa habitual de que se rompan los formularios hechos a medida.</li>
+  <li><strong>Verificaré una reserva completa</strong> antes y después de cada cambio que realice. Si algo falla por mi parte, lo revierto yo.</li>
+</ul>
+<p>Si al mover el código al tema hijo necesitáis que ajuste algo por mi lado, o si preferís que las exclusiones se configuren de otra forma, decídmelo a través del cliente y lo adapto.</p>
+
+<div class="foot">Mediciones realizadas el 6 de octubre de 2026 mediante análisis externo del sitio (cabeceras HTTP, HTML servido y Lighthouse 13.5.0 en perfil móvil). Documento elaborado por Anirudha Talmale.</div>
+
+</body></html>
